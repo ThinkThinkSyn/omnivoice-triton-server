@@ -225,9 +225,15 @@ Important fields:
 
 ## Benchmarks
 
-Latest local benchmark on the project test host:
+Latest local benchmark on one project test host. These numbers describe that
+hardware and launch configuration; they are not meant to imply the same device
+ids or throughput on other machines.
 
-- GPU inferers: 2, placed on the last two visible GPUs.
+- GPU hardware: 2 x NVIDIA GeForce RTX 3080, 20 GiB each as reported by
+  `nvidia-smi`.
+- Test host GPU inventory: 8 visible RTX 3080 GPUs.
+- Devices selected for this run: `CUDA_VISIBLE_DEVICES=6,7`.
+- GPU inferers: `--gpu-inferer 2`.
 - API workers: 2.
 - Runner: `hybrid`.
 - Dtype: `fp16`.
@@ -247,7 +253,7 @@ and long text. All 6 validation cases passed.
 ## Test Commands
 
 ```bash
-python tests/test_chunking.py
+PYTHONPATH=src python tests/test_chunking.py
 python tests/test_api.py
 python tests/load_1000_rps100.py \
   --total 1000 \
