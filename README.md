@@ -127,6 +127,7 @@ python -m py_compile \
 python tests/test_chunking.py
 python tests/test_api.py
 python tests/load_1000_rps100.py --total 1000 --rate 100 --concurrency-limit 512
+python tests/load_mixed_1000.py --total 1000 --rate 100 --ref-audio /path/to/ref.wav
 ```
 
 Runtime artifacts, logs, generated audio, model weights, and local environment

@@ -254,6 +254,14 @@ python tests/load_1000_rps100.py \
   --rate 100 \
   --concurrency-limit 512 \
   --out tmp/test-artifacts/load_1000_rps100_results.json
+
+python tests/load_mixed_1000.py \
+  --total 1000 \
+  --rate 100 \
+  --concurrency 512 \
+  --chunk-mode concurrent \
+  --ref-audio /path/to/ref.wav \
+  --out tmp/test-artifacts/mixed_1000_results.json
 ```
 
 Use `python -m py_compile src/*.py` for a quick syntax check.
