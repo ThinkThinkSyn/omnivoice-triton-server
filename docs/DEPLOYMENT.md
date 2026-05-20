@@ -29,12 +29,12 @@ inferer processes.
 ## Start
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
 
 CUDA_VISIBLE_DEVICES=0,1 \
-OMNIVOICE_MODEL_ID=/path/to/OmniVoice \
-scripts/start_server.sh \
+python -m omnivoice_triton_server \
   --port 9194 \
+  --model-id /path/to/OmniVoice \
   --gpu-inferer 2 \
   --max-batch-size 16 \
   --max-batch-latency 250 \
@@ -43,12 +43,15 @@ scripts/start_server.sh \
   --num-step 32
 ```
 
-`scripts/start_server.sh` is intentionally portable:
+`scripts/start_server.sh` is a POSIX shell convenience wrapper around
+`python -m omnivoice_triton_server`. It is intentionally small:
 
-- defaults to `CUDA_VISIBLE_DEVICES=0`,
-- defaults to `OMNIVOICE_MODEL_ID=k2-fsa/OmniVoice`,
 - uses `python` unless `OMNIVOICE_PYTHON` is set,
 - prepends this repository's `src/` to `PYTHONPATH`.
+
+Service defaults live in `src/config.py` and can be overridden by CLI arguments
+or `OMNIVOICE_*` environment variables. They are not defined in the shell
+wrapper.
 
 If `--fastapi-workers` is omitted, the launcher uses the effective GPU inferer
 count as the worker count. If `--gpu-inferer` exceeds visible GPUs, it is clamped

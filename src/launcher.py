@@ -85,9 +85,16 @@ def drain_stdout(proc: subprocess.Popen) -> threading.Thread:
 
 
 def set_arg_env(cfg: Settings, attr: str, value, env_name: str) -> None:
-    if value is not None:
-        os.environ[env_name] = str(value)
-        setattr(cfg, attr, value)
+    os.environ[env_name] = str(value)
+    setattr(cfg, attr, value)
+
+
+def argv_has_option(option_names: set[str]) -> bool:
+    for item in sys.argv[1:]:
+        option = item.split("=", 1)[0]
+        if option in option_names:
+            return True
+    return False
 
 
 def resolve_runtime_paths(cfg: Settings) -> None:
@@ -145,35 +152,49 @@ def cleanup_old_log_dirs(cfg: Settings) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Launch OmniVoice FastAPI server and inferer")
-    parser.add_argument("--host", default=None)
-    parser.add_argument("--port", type=int, default=None)
-    parser.add_argument("--fastapi-workers", "--workers", dest="workers", type=int, default=None)
-    parser.add_argument("--infer-port", type=int, default=None)
-    parser.add_argument("--infer-host", default=None)
-    parser.add_argument("--gpu-inferer", type=int, default=None)
-    parser.add_argument("--log-level", default=None)
-    parser.add_argument("--log-dir", default=None)
-    parser.add_argument("--log-run-id", default=None)
-    parser.add_argument("--log-file", default=None)
-    parser.add_argument("--pid-file", default=None)
-    parser.add_argument("--log-retention-days", type=int, default=None)
-    parser.add_argument("--model-id", default=None)
-    parser.add_argument("--runner-mode", choices=["official", "triton", "hybrid"], default=None)
-    parser.add_argument("--dtype", choices=["fp16", "bf16", "fp32"], default=None)
-    parser.add_argument("--device", default=None)
-    parser.add_argument("--request-timeout-s", type=float, default=None)
-    parser.add_argument("--infer-start-timeout-s", type=float, default=None)
-    parser.add_argument("--metrics-shm-path", default=None)
-    parser.add_argument("--metrics-shm-size", type=int, default=None)
-    parser.add_argument("--metrics-snapshot-interval-s", type=float, default=None)
-    parser.add_argument("--max-batch-size", "--batch-size", dest="batch_size", type=int, default=None)
+    cfg = Settings()
+    parser = argparse.ArgumentParser(
+        description="Launch OmniVoice FastAPI server and GPU inferer processes",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--host", default=cfg.host)
+    parser.add_argument("--port", type=int, default=cfg.port)
+    parser.add_argument("--fastapi-workers", "--workers", dest="workers", type=int, default=cfg.workers)
+    parser.add_argument("--infer-port", type=int, default=cfg.infer_port)
+    parser.add_argument("--infer-host", default=cfg.infer_host)
+    parser.add_argument("--gpu-inferer", type=int, default=cfg.gpu_inferer)
+    parser.add_argument("--log-level", default=cfg.log_level)
+    parser.add_argument("--log-dir", default=cfg.log_dir)
+    parser.add_argument("--log-run-id", default=cfg.log_run_id)
+    parser.add_argument("--log-file", default=cfg.log_file)
+    parser.add_argument("--pid-file", default=cfg.pid_file)
+    parser.add_argument("--log-retention-days", type=int, default=cfg.log_retention_days)
+    parser.add_argument("--model-id", default=cfg.model_id)
+    parser.add_argument("--runner-mode", choices=["official", "triton", "hybrid"], default=cfg.runner_mode)
+    parser.add_argument("--dtype", choices=["fp16", "bf16", "fp32"], default=cfg.dtype)
+    parser.add_argument("--device", default=cfg.device)
+    parser.add_argument("--request-timeout-s", type=float, default=cfg.request_timeout_s)
+    parser.add_argument("--infer-start-timeout-s", type=float, default=cfg.infer_start_timeout_s)
+    parser.add_argument("--metrics-shm-path", default=cfg.metrics_shm_path)
+    parser.add_argument("--metrics-shm-size", type=int, default=cfg.metrics_shm_size)
+    parser.add_argument(
+        "--metrics-snapshot-interval-s",
+        type=float,
+        default=cfg.metrics_snapshot_interval_s,
+    )
+    parser.add_argument(
+        "--max-batch-size",
+        "--batch-size",
+        dest="batch_size",
+        type=int,
+        default=cfg.batch_size,
+    )
     parser.add_argument(
         "--max-batch-latency",
         "--batch-wait-ms",
         dest="batch_wait_ms",
         type=int,
-        default=None,
+        default=cfg.batch_wait_ms,
         help="Maximum micro-batch wait in milliseconds",
     )
     parser.add_argument(
@@ -181,43 +202,80 @@ def main() -> None:
         "--cuda-streams",
         dest="cuda_streams",
         type=int,
-        default=None,
+        default=cfg.cuda_streams,
     )
-    parser.add_argument("--cuda-graph-min-width", type=int, default=None)
-    parser.add_argument("--cuda-graph-max-width", type=int, default=None)
-    parser.add_argument("--cuda-graph-auto-width-tokens-per-word", type=int, default=None)
-    parser.add_argument("--cuda-graph-auto-max-width", type=int, default=None)
-    parser.add_argument("--max-continuity-audio-tokens", type=int, default=None)
-    parser.add_argument("--max-continuity-text-words", type=int, default=None)
-    parser.add_argument("--sample-rate", type=int, default=None)
-    parser.add_argument("--max-sse-audio-b64-chars", type=int, default=None)
-    parser.add_argument("--max-clone-audio-prompt-cache", type=int, default=None)
-    parser.add_argument("--num-step", type=int, default=None)
-    parser.add_argument("--guidance-scale", type=float, default=None)
-    parser.add_argument("--denoise", action=argparse.BooleanOptionalAction, default=None)
-    parser.add_argument("--t-shift", type=float, default=None)
-    parser.add_argument("--position-temperature", type=float, default=None)
-    parser.add_argument("--class-temperature", type=float, default=None)
-    parser.add_argument("--layer-penalty-factor", type=float, default=None)
-    parser.add_argument("--audio-chunk-duration", type=float, default=None)
-    parser.add_argument("--audio-chunk-threshold", type=float, default=None)
-    parser.add_argument("--postprocess-output", action=argparse.BooleanOptionalAction, default=None)
-    parser.add_argument("--text-chunk-words", type=int, default=None)
-    parser.add_argument("--text-chunk-soft-overflow-ratio", type=float, default=None)
-    parser.add_argument("--text-chunk-same-sentence-penalty", type=int, default=None)
-    parser.add_argument("--text-chunk-sentence-boundary-penalty", type=int, default=None)
-    parser.add_argument("--text-chunk-fragment-boundary-penalty", type=int, default=None)
-    parser.add_argument("--text-chunk-short-underfill-ratio", type=float, default=None)
-    parser.add_argument("--text-chunk-short-underfill-penalty", type=int, default=None)
-    parser.add_argument("--default-voice-instructions", default=None)
+    parser.add_argument("--cuda-graph-min-width", type=int, default=cfg.cuda_graph_min_width)
+    parser.add_argument("--cuda-graph-max-width", type=int, default=cfg.cuda_graph_max_width)
+    parser.add_argument(
+        "--cuda-graph-auto-width-tokens-per-word",
+        type=int,
+        default=cfg.cuda_graph_auto_width_tokens_per_word,
+    )
+    parser.add_argument("--cuda-graph-auto-max-width", type=int, default=cfg.cuda_graph_auto_max_width)
+    parser.add_argument("--max-continuity-audio-tokens", type=int, default=cfg.max_continuity_audio_tokens)
+    parser.add_argument("--max-continuity-text-words", type=int, default=cfg.max_continuity_text_words)
+    parser.add_argument("--sample-rate", type=int, default=cfg.sample_rate)
+    parser.add_argument("--max-sse-audio-b64-chars", type=int, default=cfg.max_sse_audio_b64_chars)
+    parser.add_argument("--max-clone-audio-prompt-cache", type=int, default=cfg.max_clone_audio_prompt_cache)
+    parser.add_argument("--num-step", type=int, default=cfg.num_step)
+    parser.add_argument("--guidance-scale", type=float, default=cfg.guidance_scale)
+    parser.add_argument("--denoise", action=argparse.BooleanOptionalAction, default=cfg.denoise)
+    parser.add_argument("--t-shift", type=float, default=cfg.t_shift)
+    parser.add_argument("--position-temperature", type=float, default=cfg.position_temperature)
+    parser.add_argument("--class-temperature", type=float, default=cfg.class_temperature)
+    parser.add_argument("--layer-penalty-factor", type=float, default=cfg.layer_penalty_factor)
+    parser.add_argument("--audio-chunk-duration", type=float, default=cfg.audio_chunk_duration)
+    parser.add_argument("--audio-chunk-threshold", type=float, default=cfg.audio_chunk_threshold)
+    parser.add_argument(
+        "--postprocess-output",
+        action=argparse.BooleanOptionalAction,
+        default=cfg.postprocess_output,
+    )
+    parser.add_argument("--text-chunk-words", type=int, default=cfg.text_chunk_words)
+    parser.add_argument(
+        "--text-chunk-soft-overflow-ratio",
+        type=float,
+        default=cfg.text_chunk_soft_overflow_ratio,
+    )
+    parser.add_argument(
+        "--text-chunk-same-sentence-penalty",
+        type=int,
+        default=cfg.text_chunk_same_sentence_penalty,
+    )
+    parser.add_argument(
+        "--text-chunk-sentence-boundary-penalty",
+        type=int,
+        default=cfg.text_chunk_sentence_boundary_penalty,
+    )
+    parser.add_argument(
+        "--text-chunk-fragment-boundary-penalty",
+        type=int,
+        default=cfg.text_chunk_fragment_boundary_penalty,
+    )
+    parser.add_argument(
+        "--text-chunk-short-underfill-ratio",
+        type=float,
+        default=cfg.text_chunk_short_underfill_ratio,
+    )
+    parser.add_argument(
+        "--text-chunk-short-underfill-penalty",
+        type=int,
+        default=cfg.text_chunk_short_underfill_penalty,
+    )
+    parser.add_argument("--default-voice-instructions", default=cfg.default_voice_instructions)
+    for action in parser._actions:
+        if action.dest != "help" and action.help is None:
+            action.help = "default: %(default)s"
     args = parser.parse_args()
 
-    cfg = Settings()
     set_arg_env(cfg, "host", args.host, "OMNIVOICE_HOST")
     set_arg_env(cfg, "port", args.port, "OMNIVOICE_PORT")
-    workers_was_explicit = args.workers is not None or "OMNIVOICE_WORKERS" in os.environ
+    workers_was_explicit = (
+        argv_has_option({"--fastapi-workers", "--workers"}) or "OMNIVOICE_WORKERS" in os.environ
+    )
     set_arg_env(cfg, "workers", args.workers, "OMNIVOICE_WORKERS")
     set_arg_env(cfg, "infer_host", args.infer_host, "OMNIVOICE_INFER_HOST")
+    set_arg_env(cfg, "infer_port", args.infer_port, "OMNIVOICE_INFER_PORT")
     set_arg_env(cfg, "gpu_inferer", args.gpu_inferer, "OMNIVOICE_GPU_INFERER")
     set_arg_env(cfg, "log_level", args.log_level, "OMNIVOICE_LOG_LEVEL")
     set_arg_env(cfg, "log_dir", args.log_dir, "OMNIVOICE_LOG_DIR")

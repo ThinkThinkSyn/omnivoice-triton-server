@@ -65,20 +65,19 @@ CPU inferer code was removed. Scale this server with GPU inferer processes.
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 
 export CUDA_VISIBLE_DEVICES=0
-export OMNIVOICE_MODEL_ID=k2-fsa/OmniVoice
-scripts/start_server.sh
+python -m omnivoice_triton_server
 ```
 
 Two-GPU example:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 \
-OMNIVOICE_MODEL_ID=/path/to/OmniVoice \
-scripts/start_server.sh \
+python -m omnivoice_triton_server \
   --port 9194 \
+  --model-id /path/to/OmniVoice \
   --gpu-inferer 2 \
   --max-batch-size 16 \
   --max-batch-latency 250 \
@@ -90,6 +89,8 @@ scripts/start_server.sh \
 `CUDA_VISIBLE_DEVICES` is a deployment choice. The benchmark below used
 `CUDA_VISIBLE_DEVICES=6,7` on one 8-GPU test server because those two devices
 were selected for that run; use the device ids that are correct on your machine.
+`scripts/start_server.sh` is only a POSIX shell convenience wrapper around the
+same module entrypoint.
 
 ## Important Arguments
 
@@ -111,6 +112,8 @@ were selected for that run; use the device ids that are correct on your machine.
 - `--log-dir`, `--log-run-id`, `--log-file`, `--pid-file`: runtime log layout.
 
 All settings can also be set with `OMNIVOICE_*` environment variables.
+Python defaults live in `src/config.py`; shell scripts do not define service
+defaults.
 
 ## API
 
