@@ -4,6 +4,8 @@ OpenAI-compatible OmniVoice TTS server built for batched GPU inference. The
 server runs FastAPI workers for request handling and one or more independent GPU
 inferer processes for model execution.
 
+中文说明: [docs/README.zh-CN.md](docs/README.zh-CN.md)
+
 ## Origin
 
 This repository combines three code lines into one deployable service:
@@ -160,15 +162,15 @@ Supported response formats are `wav` and raw `pcm`.
 
 ## Benchmark
 
-These numbers are from one local test server and are included to describe the
-observed configuration, not as a hardware-independent promise.
+These numbers are from one local test server and describe that specific
+configuration, not a hardware-independent promise.
 
 Hardware and launch configuration:
 
 - GPU hardware: 2 x NVIDIA GeForce RTX 3080, 20 GiB each as reported by
   `nvidia-smi`.
-- Test server had 8 visible RTX 3080 GPUs; this run selected GPU ids `6,7` with
-  `CUDA_VISIBLE_DEVICES=6,7`.
+- Test server inventory: 8 visible RTX 3080 GPUs.
+- Selected devices for the run: `CUDA_VISIBLE_DEVICES=6,7`.
 - GPU inferers: `--gpu-inferer 2`.
 - API workers: 2.
 - Runner: `hybrid`.
@@ -178,17 +180,26 @@ Hardware and launch configuration:
 - Generation steps: `--num-step 32`.
 - Load shape: 1000 requests scheduled at 100 req/s.
 
-Results:
+Summary:
 
-| Traffic | Success | Completion | Estimated RTF | p95 latency | Backend tasks |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Short mixed speech/design | 1000/1000 | 16.246 req/s | 0.0783 | 50.84 s | 1000 |
-| Mixed short/medium/long speech/design/clone | 1000/1000 | 4.046 req/s | 0.0933 | 228.60 s | 1733 |
+| Traffic | HTTP 200 | HTTP errors | Invalid audio | Backend errors | Wall time | Completion RPS | Audio seconds | RTF wall/audio | p50 | p95 | p99 | max | Bytes | Backend tasks | Backend batches | Avg batch size |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Short mixed speech/design | 1000 | 0 | 0 | 0 | 61.553 s | 16.246 | 786.100 s | 0.0783 | 26.6065 s | 50.8381 s | 54.6932 s | 55.8403 s | 37,743,800 | 1000 | 68 | 14.706 |
+| Mixed short/medium/long speech/design/clone | 1000 | 0 | 0 | 0 | 247.159 s | 4.046 | 2,648.752 s | 0.0933 | 119.3613 s | 228.5990 s | 236.4849 s | 236.6119 s | 127,184,080 | 1733 | 67 | 25.866 |
 
-The mixed test includes chunked long requests and clone/design paths, so backend
-task count is higher than HTTP request count. Audio quality smoke validation
-used ASR comparison over auto, design, and clone requests for both short and
-long text; all 6 validation cases passed.
+Mixed benchmark per-kind breakdown:
+
+| Kind | Count | Mean latency | p95 | Max |
+| --- | ---: | ---: | ---: | ---: |
+| clone | 50 | 74.6742 s | 143.6043 s | 145.6617 s |
+| speech | 900 | 122.8774 s | 228.6261 s | 236.6119 s |
+| design | 50 | 129.3640 s | 229.6973 s | 230.9176 s |
+
+Both benchmarks recorded `0` HTTP failures, `0` invalid audio outputs, and
+`0` backend errors. The mixed test includes chunked long requests plus clone
+and design paths, so backend task count is higher than HTTP request count.
+Audio quality smoke validation used ASR comparison over auto, design, and clone
+requests for both short and long text; all 6 validation cases passed.
 
 ## Development Checks
 

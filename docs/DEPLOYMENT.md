@@ -245,13 +245,24 @@ ids or throughput on other machines.
 - Generation steps: `--num-step 32`.
 - Load: 1000 requests at a 100 req/s target arrival rate.
 
-| Traffic | Success | Completion | Estimated RTF | p95 latency | Notes |
-| --- | ---: | ---: | ---: | ---: | --- |
-| Short mixed speech/design | 1000/1000 | 16.246 req/s | 0.0783 | 50.84 s | mixed voice, speed, duration, format |
-| Mixed short/medium/long speech/design/clone | 1000/1000 | 4.046 req/s | 0.0933 | 228.60 s | includes chunking and clone path |
+| Traffic | HTTP 200 | HTTP errors | Invalid audio | Backend errors | Wall time | Completion RPS | Audio seconds | RTF wall/audio | p50 | p95 | p99 | max | Bytes | Backend tasks | Backend batches | Avg batch size |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Short mixed speech/design | 1000 | 0 | 0 | 0 | 61.553 s | 16.246 | 786.100 s | 0.0783 | 26.6065 s | 50.8381 s | 54.6932 s | 55.8403 s | 37,743,800 | 1000 | 68 | 14.706 |
+| Mixed short/medium/long speech/design/clone | 1000 | 0 | 0 | 0 | 247.159 s | 4.046 | 2,648.752 s | 0.0933 | 119.3613 s | 228.5990 s | 236.4849 s | 236.6119 s | 127,184,080 | 1733 | 67 | 25.866 |
 
-ASR quality smoke validation covered auto, design, and clone modes with short
-and long text. All 6 validation cases passed.
+Mixed benchmark per-kind breakdown:
+
+| Kind | Count | Mean latency | p95 | Max |
+| --- | ---: | ---: | ---: | ---: |
+| clone | 50 | 74.6742 s | 143.6043 s | 145.6617 s |
+| speech | 900 | 122.8774 s | 228.6261 s | 236.6119 s |
+| design | 50 | 129.3640 s | 229.6973 s | 230.9176 s |
+
+Both benchmarks recorded `0` HTTP failures, `0` invalid audio outputs, and
+`0` backend errors. The mixed test includes chunked long requests and clone and
+design paths, so backend task count is higher than HTTP request count. ASR
+quality smoke validation covered auto, design, and clone modes with short and
+long text; all 6 validation cases passed.
 
 ## Test Commands
 
