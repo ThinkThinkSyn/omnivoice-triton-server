@@ -257,14 +257,18 @@ CUDA Graphs are captured at startup for a compact shape plan:
 
 - business batch buckets are powers-of-two style high-value buckets up to the
   effective max batch,
-- width buckets include the default short/medium widths and only add expensive
-  wide shapes when memory headroom allows,
+- mandatory graph capture first tries the requested max width and max batch,
+  then falls back through smaller effective widths and batch sizes when the GPU
+  cannot keep the configured memory headroom,
+- width buckets include the default short/medium widths and only add optional
+  expensive wide shapes when memory headroom allows,
 - runtime inputs pad upward to the nearest prewarmed shape,
 - out-of-plan wide single-chunk batches can split into graph-coverable
   microbatches instead of forcing large eager fallback.
 
 `/metrics` exposes graph entries, hits, misses, capture failures, skipped
-shapes, memory snapshots, batch counters, queue ages, and error counters.
+shapes, requested/effective graph width and batch limits, memory snapshots,
+batch counters, queue ages, and error counters.
 
 ## Metrics
 

@@ -26,6 +26,22 @@ def _fallback_max_batch_candidates(requested: int) -> list[int]:
     return sorted(candidates, reverse=True)
 
 
+def _fallback_max_width_candidates(requested: int, min_width: int) -> list[int]:
+    requested = max(1, int(requested))
+    min_width = max(1, int(min_width))
+    anchors = [64, 128, 160, 256, 512]
+    candidates = {requested}
+
+    for width in reversed(anchors):
+        if min_width <= width < requested:
+            candidates.add(width)
+
+    if min_width < requested:
+        candidates.add(min_width)
+
+    return sorted(candidates, reverse=True)
+
+
 def _dedupe_sorted(values: list[int]) -> list[int]:
     return sorted({max(1, int(value)) for value in values})
 
@@ -56,7 +72,8 @@ class _CUDAGraphForward:
         self._num_codebooks = int(getattr(model.config, "num_audio_codebook", 8))
         self._pad_id = int(getattr(model.config, "audio_mask_id", 1024))
         self._min_width = max(1, int(min_width))
-        self._max_width = max(self._min_width, int(max_width))
+        self._requested_max_width = max(self._min_width, int(max_width))
+        self._max_width = self._requested_max_width
         self._batch_buckets: list[int] = []
         self._width_buckets: list[int] = []
         self._width_batch_buckets: dict[int, list[int]] = {}
@@ -76,60 +93,77 @@ class _CUDAGraphForward:
         self._memory_headroom_bytes = max(2 * _GIB, int(total_bytes * 0.12))
 
         last_error: Exception | None = None
-        for max_batch in _fallback_max_batch_candidates(self._requested_max_batch_size):
-            self._clear_graph_entries()
-            self._max_batch_size = max_batch
-            shape_plan = self._shape_plan(max_batch)
-            try:
-                logger.info(
-                    "Prewarming mandatory CUDA Graphs: requested_max_batch=%d "
-                    "effective_candidate=%d width_batch_plan=%s",
-                    self._requested_max_batch_size,
-                    max_batch,
-                    shape_plan,
-                )
-                for width, batch_buckets in shape_plan.items():
-                    self._capture_width_group(width, batch_buckets)
-                    self._width_batch_buckets[width] = list(batch_buckets)
-                if not self._has_memory_headroom():
-                    raise RuntimeError(
-                        "Mandatory CUDA Graph shapes exceeded memory headroom: "
-                        f"memory={self._memory_snapshot()}"
-                    )
-                self._width_buckets = sorted(shape_plan)
-                self._batch_buckets = sorted(
-                    {bucket for buckets in shape_plan.values() for bucket in buckets}
-                )
-                break
-            except Exception as exc:
-                last_error = exc
-                self._skipped_shapes.append(
-                    {
-                        "phase": "mandatory",
-                        "max_business_batch_size": max_batch,
-                        "width_batch_plan": shape_plan,
-                        "reason": repr(exc),
-                    }
-                )
-                logger.warning(
-                    "Skipping CUDA Graph effective max batch %d after prewarm failure",
-                    max_batch,
-                    exc_info=True,
-                )
+        graph_plan_ready = False
+
+        for max_width in _fallback_max_width_candidates(self._requested_max_width, self._min_width):
+            self._max_width = max_width
+            for max_batch in _fallback_max_batch_candidates(self._requested_max_batch_size):
                 self._clear_graph_entries()
-                torch.cuda.empty_cache()
-        else:
+                self._max_batch_size = max_batch
+                shape_plan = self._shape_plan(max_batch)
+                try:
+                    logger.info(
+                        "Prewarming mandatory CUDA Graphs: requested_max_batch=%d "
+                        "requested_max_width=%d effective_batch_candidate=%d "
+                        "effective_width_candidate=%d width_batch_plan=%s",
+                        self._requested_max_batch_size,
+                        self._requested_max_width,
+                        max_batch,
+                        max_width,
+                        shape_plan,
+                    )
+                    for width, batch_buckets in shape_plan.items():
+                        self._capture_width_group(width, batch_buckets)
+                        self._width_batch_buckets[width] = list(batch_buckets)
+                    if not self._has_memory_headroom():
+                        raise RuntimeError(
+                            "Mandatory CUDA Graph shapes exceeded memory headroom: "
+                            f"memory={self._memory_snapshot()}"
+                        )
+                    self._width_buckets = sorted(shape_plan)
+                    self._batch_buckets = sorted(
+                        {bucket for buckets in shape_plan.values() for bucket in buckets}
+                    )
+                    graph_plan_ready = True
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    self._skipped_shapes.append(
+                        {
+                            "phase": "mandatory",
+                            "max_business_batch_size": max_batch,
+                            "max_width": max_width,
+                            "width_batch_plan": shape_plan,
+                            "reason": repr(exc),
+                        }
+                    )
+                    logger.warning(
+                        "Skipping CUDA Graph effective max batch %d max width %d "
+                        "after prewarm failure",
+                        max_batch,
+                        max_width,
+                        exc_info=True,
+                    )
+                    self._clear_graph_entries()
+                    torch.cuda.empty_cache()
+            if graph_plan_ready:
+                break
+
+        if not graph_plan_ready:
             raise RuntimeError("No CUDA Graph shape set fits available memory") from last_error
 
         self._prewarm_optional_shapes()
         self._memory_after = self._memory_snapshot()
         logger.info(
             "Prewarmed %d CUDA Graph shapes. requested_max_batch=%d "
-            "effective_max_batch=%d business_batch_buckets=%s width_buckets=%s "
+            "requested_max_width=%d effective_max_batch=%d effective_max_width=%d "
+            "business_batch_buckets=%s width_buckets=%s "
             "memory_headroom_gb=%.2f memory_after=%s",
             len(self._graphs),
             self._requested_max_batch_size,
+            self._requested_max_width,
             self._max_batch_size,
+            self._max_width,
             self._batch_buckets,
             self._width_buckets,
             self._memory_headroom_bytes / _GIB,
@@ -496,6 +530,8 @@ class _CUDAGraphForward:
             entry.clear()
         self._graphs.clear()
         self._width_batch_buckets.clear()
+        self._batch_buckets.clear()
+        self._width_buckets.clear()
 
     def stats(self) -> dict[str, Any]:
         return {
@@ -503,6 +539,8 @@ class _CUDAGraphForward:
             "mode": "prewarmed_fixed_shapes",
             "requested_max_business_batch_size": self._requested_max_batch_size,
             "max_business_batch_size": self._max_batch_size,
+            "requested_max_width": self._requested_max_width,
+            "max_width": self._max_width,
             "business_batch_buckets": self._batch_buckets,
             "width_buckets": self._width_buckets,
             "width_batch_buckets": {

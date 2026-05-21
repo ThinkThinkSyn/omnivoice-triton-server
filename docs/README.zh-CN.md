@@ -90,7 +90,8 @@ omnivoice-triton-server install-service \
   - `sequential`：逐 chunk 串行 continuity
   - `none`：仍会 chunk，但尽量按模型上下文上限拼大 chunk
 - 混合语言语义切分：中日韩泰等按字符计，非 CJK 按 token 计
-- 预热固定 CUDA Graph 形状，带 memory headroom 检查和 microbatch 拆分
+- 预热固定 CUDA Graph 形状，带 memory headroom 检查；低显存 GPU 会自动降低
+  effective batch/width，避免硬塞所有 graph
 
 CPU inferer 已移除，扩容只靠 GPU inferer。
 

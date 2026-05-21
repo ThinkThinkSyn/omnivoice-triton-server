@@ -145,8 +145,9 @@ mirror; it is a server-oriented integration.
   non-CJK token counting, punctuation-aware recursive splitting, and balanced
   packing near the configured word limit.
 - Fixed-shape CUDA Graph prewarming with compact batch/width buckets, memory
-  headroom checks, graph hit/miss metrics, and graph-aware microbatch splitting
-  for oversized batches.
+  headroom checks, automatic effective batch/width fallback on smaller GPUs,
+  graph hit/miss metrics, and graph-aware microbatch splitting for oversized
+  batches.
 
 CPU inferer code was removed. Scale this server with GPU inferer processes.
 
@@ -269,6 +270,10 @@ Final mixed run graph state, aggregated across two GPU inferers:
 The graph miss count is the number to watch when changing chunking, graph width
 buckets, or `--max-batch-size`; sustained misses usually mean requests are
 falling outside the prewarmed shape plan.
+On lower-memory GPUs, check `requested_max_width`, `max_width`,
+`requested_max_business_batch_size`, `max_business_batch_size`, and
+`skipped_shapes` in `/metrics` to confirm whether startup reduced the graph
+plan to fit available VRAM.
 
 ## Development Checks
 
