@@ -181,44 +181,68 @@ Supported response formats are `wav` and raw `pcm`.
 
 ## Benchmark
 
-These numbers are from one local test server and describe that specific
-configuration, not a hardware-independent promise.
+These numbers are for capacity planning on one local test host. They are not a
+hardware-independent promise.
 
-Hardware and launch configuration:
+Test configuration:
 
-- GPU hardware: 2 x NVIDIA GeForce RTX 3080, 20 GiB each as reported by
-  `nvidia-smi`.
-- Test server inventory: 8 visible RTX 3080 GPUs.
-- Selected devices for the run: `CUDA_VISIBLE_DEVICES=6,7`.
-- GPU inferers: `--gpu-inferer 2`.
-- API workers: 2.
-- Runner: `hybrid`.
-- Dtype: `fp16`.
-- Batch: `--max-batch-size 16`.
-- CUDA streams: `--cuda-stream-count 2`.
-- Generation steps: `--num-step 32`.
-- Load shape: 1000 requests scheduled at 100 req/s.
+- Hardware used by this service: 2 x NVIDIA GeForce RTX 3080, 20 GiB each.
+- Host inventory: 8 visible RTX 3080 GPUs; this run used
+  `CUDA_VISIBLE_DEVICES=6,7`.
+- Launch: `--gpu-inferer 2 --fastapi-workers 2 --runner-mode hybrid --dtype fp16
+  --max-batch-size 16 --max-batch-latency 250 --cuda-stream-count 2
+  --num-step 32`.
+- Load generator: 1000 requests scheduled at 100 req/s. Latency therefore
+  includes queueing after the offered load exceeds service capacity.
+- Audio quality smoke: auto, design, and clone outputs were checked by ASR on
+  both short and long texts.
 
-Summary:
+### Throughput And Latency
 
-| Traffic | HTTP 200 | HTTP errors | Invalid audio | Backend errors | Wall time | Completion RPS | Audio seconds | RTF wall/audio | p50 | p95 | p99 | max | Bytes | Backend tasks | Backend batches | Avg batch size |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Short mixed speech/design | 1000 | 0 | 0 | 0 | 61.553 s | 16.246 | 786.100 s | 0.0783 | 26.6065 s | 50.8381 s | 54.6932 s | 55.8403 s | 37,743,800 | 1000 | 68 | 14.706 |
-| Mixed short/medium/long speech/design/clone | 1000 | 0 | 0 | 0 | 247.159 s | 4.046 | 2,648.752 s | 0.0933 | 119.3613 s | 228.5990 s | 236.4849 s | 236.6119 s | 127,184,080 | 1733 | 67 | 25.866 |
+| Workload | Wall time | Completed req/s | Generated audio | Audio realtime | RTF | Mean latency | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Short speech/design | 61.553 s | 16.246 | 786.100 s | 12.771x | 0.0783 | 27.2485 s | 26.6065 s | 50.8381 s | 54.6932 s |
+| Mixed short/medium/long speech/design/clone | 247.159 s | 4.046 | 2,648.752 s | 10.717x | 0.0933 | 120.7916 s | 119.3613 s | 228.5990 s | 236.4849 s |
 
-Mixed benchmark per-kind breakdown:
+`Audio realtime` is generated audio duration divided by wall time. `RTF` is
+wall time divided by generated audio duration.
 
-| Kind | Count | Mean latency | p95 | Max |
+### Scheduler Efficiency
+
+| Workload | Client requests | Backend tasks | Tasks/request | Backend batches | Tasks/backend batch | Backend task/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Short speech/design | 1,000 | 1,000 | 1.000 | 68 | 14.706 | 16.246 |
+| Mixed short/medium/long speech/design/clone | 1,000 | 1,733 | 1.733 | 67 | 25.866 | 7.011 |
+
+The mixed run has more backend tasks than client requests because long inputs are
+split into chunks. The useful batching signal is `Tasks/backend batch`: higher
+means the scheduler kept the GPU inferers fed with larger model batches.
+
+### Mixed Workload Breakdown
+
+| Kind | Requests | Mean latency | p95 | Max |
 | --- | ---: | ---: | ---: | ---: |
-| clone | 50 | 74.6742 s | 143.6043 s | 145.6617 s |
 | speech | 900 | 122.8774 s | 228.6261 s | 236.6119 s |
 | design | 50 | 129.3640 s | 229.6973 s | 230.9176 s |
+| clone | 50 | 74.6742 s | 143.6043 s | 145.6617 s |
 
-Both benchmarks recorded `0` HTTP failures, `0` invalid audio outputs, and
-`0` backend errors. The mixed test includes chunked long requests plus clone
-and design paths, so backend task count is higher than HTTP request count.
-Audio quality smoke validation used ASR comparison over auto, design, and clone
-requests for both short and long text; all 6 validation cases passed.
+### CUDA Graph Behavior
+
+Final mixed run graph state, aggregated across two GPU inferers:
+
+- Graph entries per inferer: 14.
+- Captured shapes per inferer:
+  `(2,8,128)`, `(2,8,160)`, `(2,8,256)`, `(2,8,512)`,
+  `(8,8,64)`, `(8,8,128)`, `(8,8,160)`, `(8,8,256)`,
+  `(16,8,128)`, `(16,8,160)`, `(16,8,256)`,
+  `(32,8,64)`, `(32,8,128)`, `(32,8,160)`.
+- During the mixed 1000-request run: 11,520 graph hits and 32 graph misses
+  after subtracting the pre-run counters.
+- Max backend batch seen by each inferer: 49 and 46 tasks.
+
+The graph miss count is the number to watch when changing chunking, graph width
+buckets, or `--max-batch-size`; sustained misses usually mean requests are
+falling outside the prewarmed shape plan.
 
 ## Development Checks
 

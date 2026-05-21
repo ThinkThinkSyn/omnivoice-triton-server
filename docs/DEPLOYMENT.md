@@ -260,41 +260,53 @@ Important fields:
 
 ## Benchmarks
 
-Latest local benchmark on one project test host. These numbers describe that
-hardware and launch configuration; they are not meant to imply the same device
-ids or throughput on other machines.
+Latest local benchmark on one project test host. These numbers are meant for
+capacity planning on this hardware and launch configuration.
 
-- GPU hardware: 2 x NVIDIA GeForce RTX 3080, 20 GiB each as reported by
-  `nvidia-smi`.
+- Hardware used by this service: 2 x NVIDIA GeForce RTX 3080, 20 GiB each.
 - Test host GPU inventory: 8 visible RTX 3080 GPUs.
 - Devices selected for this run: `CUDA_VISIBLE_DEVICES=6,7`.
-- GPU inferers: `--gpu-inferer 2`.
-- API workers: 2.
-- Runner: `hybrid`.
-- Dtype: `fp16`.
-- Batch: `--max-batch-size 16`.
-- CUDA streams: `--cuda-stream-count 2`.
-- Generation steps: `--num-step 32`.
+- Launch: `--gpu-inferer 2 --fastapi-workers 2 --runner-mode hybrid --dtype fp16
+  --max-batch-size 16 --max-batch-latency 250 --cuda-stream-count 2
+  --num-step 32`.
 - Load: 1000 requests at a 100 req/s target arrival rate.
 
-| Traffic | HTTP 200 | HTTP errors | Invalid audio | Backend errors | Wall time | Completion RPS | Audio seconds | RTF wall/audio | p50 | p95 | p99 | max | Bytes | Backend tasks | Backend batches | Avg batch size |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Short mixed speech/design | 1000 | 0 | 0 | 0 | 61.553 s | 16.246 | 786.100 s | 0.0783 | 26.6065 s | 50.8381 s | 54.6932 s | 55.8403 s | 37,743,800 | 1000 | 68 | 14.706 |
-| Mixed short/medium/long speech/design/clone | 1000 | 0 | 0 | 0 | 247.159 s | 4.046 | 2,648.752 s | 0.0933 | 119.3613 s | 228.5990 s | 236.4849 s | 236.6119 s | 127,184,080 | 1733 | 67 | 25.866 |
+### Throughput And Latency
 
-Mixed benchmark per-kind breakdown:
+| Workload | Wall time | Completed req/s | Generated audio | Audio realtime | RTF | Mean latency | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Short speech/design | 61.553 s | 16.246 | 786.100 s | 12.771x | 0.0783 | 27.2485 s | 26.6065 s | 50.8381 s | 54.6932 s |
+| Mixed short/medium/long speech/design/clone | 247.159 s | 4.046 | 2,648.752 s | 10.717x | 0.0933 | 120.7916 s | 119.3613 s | 228.5990 s | 236.4849 s |
 
-| Kind | Count | Mean latency | p95 | Max |
+### Scheduler Efficiency
+
+| Workload | Client requests | Backend tasks | Tasks/request | Backend batches | Tasks/backend batch | Backend task/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Short speech/design | 1,000 | 1,000 | 1.000 | 68 | 14.706 | 16.246 |
+| Mixed short/medium/long speech/design/clone | 1,000 | 1,733 | 1.733 | 67 | 25.866 | 7.011 |
+
+### Mixed Workload Breakdown
+
+| Kind | Requests | Mean latency | p95 | Max |
 | --- | ---: | ---: | ---: | ---: |
-| clone | 50 | 74.6742 s | 143.6043 s | 145.6617 s |
 | speech | 900 | 122.8774 s | 228.6261 s | 236.6119 s |
 | design | 50 | 129.3640 s | 229.6973 s | 230.9176 s |
+| clone | 50 | 74.6742 s | 143.6043 s | 145.6617 s |
 
-Both benchmarks recorded `0` HTTP failures, `0` invalid audio outputs, and
-`0` backend errors. The mixed test includes chunked long requests and clone and
-design paths, so backend task count is higher than HTTP request count. ASR
-quality smoke validation covered auto, design, and clone modes with short and
-long text; all 6 validation cases passed.
+### CUDA Graph Behavior
+
+- Graph entries per inferer: 14.
+- Captured shapes per inferer:
+  `(2,8,128)`, `(2,8,160)`, `(2,8,256)`, `(2,8,512)`,
+  `(8,8,64)`, `(8,8,128)`, `(8,8,160)`, `(8,8,256)`,
+  `(16,8,128)`, `(16,8,160)`, `(16,8,256)`,
+  `(32,8,64)`, `(32,8,128)`, `(32,8,160)`.
+- Mixed 1000-request run graph delta: 11,520 hits and 32 misses after
+  subtracting pre-run counters.
+- Max backend batch seen by the two inferers: 49 and 46 tasks.
+
+Audio quality smoke validation covered auto, design, and clone modes with short
+and long text.
 
 ## Test Commands
 
