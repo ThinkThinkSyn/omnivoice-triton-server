@@ -1245,6 +1245,8 @@ class Inferer:
 
     def group_key(self, queued: QueuedTask) -> tuple[Any, ...]:
         task = queued.task
+        if task.mode in {"auto", "design"}:
+            return ("voice",)
         return (
             task.mode,
         )

@@ -25,7 +25,7 @@ class TritonFasterRunner(FasterRunner):
 
     Args:
         patch_range: Half-open ``(start, end)`` range of decoder layer
-            indices to patch. Defaults to ``(0, 24)``. ``None`` patches all.
+            indices to patch. ``None`` patches all layers.
         enable_sage_attention: Replace SDPA with SageAttention. Requires
             ``pip install sageattention``. Gracefully skips if unavailable.
         device: Target device (default: "cuda").
@@ -35,7 +35,7 @@ class TritonFasterRunner(FasterRunner):
 
     def __init__(
         self,
-        patch_range: tuple[int, int] | None = (0, 24),
+        patch_range: tuple[int, int] | None = None,
         enable_sage_attention: bool = False,
         device: str = "cuda",
         model_id: str = "k2-fsa/OmniVoice",

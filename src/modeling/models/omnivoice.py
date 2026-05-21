@@ -1327,7 +1327,7 @@ class OmniVoice(PreTrainedModel):
                 input_ids=active_input_ids,
                 audio_mask=active_audio_mask,
                 attention_mask=active_attention_mask,
-            ).logits.to(torch.float32)
+            ).logits
 
             active_count = len(active)
             for active_pos, (i, local_step) in enumerate(active):
@@ -1344,13 +1344,13 @@ class OmniVoice(PreTrainedModel):
                     :,
                     c_len - t_len : c_len,
                     :,
-                ]
+                ].to(torch.float32)
                 u_logits = batch_logits[
                     active_count + active_pos : active_count + active_pos + 1,
                     :,
                     :t_len,
                     :,
-                ]
+                ].to(torch.float32)
 
                 pred_tokens, scores = self._predict_tokens_with_scoring(
                     c_logits, u_logits, gen_config
@@ -1379,6 +1379,28 @@ class OmniVoice(PreTrainedModel):
         return [tokens[i, :, : task.target_lens[i]] for i in range(B)]
 
     def _predict_tokens_with_scoring(self, c_logits, u_logits, gen_config):
+        if gen_config.class_temperature <= 0.0:
+            mask_id = int(self.config.audio_mask_id)
+            if gen_config.guidance_scale != 0:
+                c_log_probs = F.log_softmax(c_logits, dim=-1)
+                u_log_probs = F.log_softmax(u_logits, dim=-1)
+                guided_logits = c_log_probs + gen_config.guidance_scale * (
+                    c_log_probs - u_log_probs
+                )
+            else:
+                guided_logits = c_logits
+
+            log_norm = torch.logsumexp(guided_logits, dim=-1)
+            if mask_id == guided_logits.shape[-1] - 1:
+                candidate_logits = guided_logits[..., :mask_id]
+            else:
+                candidate_logits = guided_logits.clone()
+                candidate_logits[..., mask_id] = -float("inf")
+
+            confidence_scores, pred_tokens = candidate_logits.max(dim=-1)
+            confidence_scores = confidence_scores - log_norm
+            return pred_tokens, confidence_scores
+
         if gen_config.guidance_scale != 0:
             c_log_probs = F.log_softmax(c_logits, dim=-1)
             u_log_probs = F.log_softmax(u_logits, dim=-1)
