@@ -67,9 +67,29 @@ omnivoice-triton-server stop --systemd --service-name omnivoice-server
 
 ## Systemd Service
 
-Use `scripts/install_systemd_service.sh` to generate and register a Linux
-systemd unit. The script requires the CUDA device list and accepts normal
-launcher arguments after `--`.
+Use `omnivoice-triton-server install-service` to generate and register a Linux
+systemd unit from a pip install. The command requires the CUDA device list and
+accepts normal launcher arguments after `--`.
+
+```bash
+omnivoice-triton-server install-service \
+  --cuda-visible-devices 0,1 \
+  --python "$(command -v python)" \
+  --service-name omnivoice-server \
+  --working-dir "$PWD" \
+  -- \
+  --port 9194 \
+  --model-id /path/to/OmniVoice \
+  --gpu-inferer 2 \
+  --max-batch-size 16 \
+  --max-batch-latency 250 \
+  --cuda-stream-count 2 \
+  --runner-mode hybrid \
+  --num-step 32
+```
+
+The source tree also includes `scripts/install_systemd_service.sh`, which uses
+the same service layout:
 
 ```bash
 scripts/install_systemd_service.sh \

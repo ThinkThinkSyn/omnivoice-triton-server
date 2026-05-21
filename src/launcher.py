@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import grp
 import json
 import os
+import shlex
 import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -675,6 +679,189 @@ def terminate_pids(pids: set[int], timeout_s: float, kill_after_timeout: bool) -
     return 1
 
 
+def validate_service_name(service_name: str) -> str:
+    if service_name.endswith(".service"):
+        service_name = service_name[: -len(".service")]
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.@-")
+    if not service_name or any(ch not in allowed for ch in service_name):
+        raise ValueError(f"Invalid service name: {service_name!r}")
+    return service_name
+
+
+def validate_env_lines(env_lines: list[str]) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    for item in env_lines:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise ValueError(f"Invalid --env value, expected KEY=VALUE: {item!r}")
+        if not key or not (key[0].isalpha() or key[0] == "_"):
+            raise ValueError(f"Invalid environment key: {key!r}")
+        if any(not (ch.isalnum() or ch == "_") for ch in key):
+            raise ValueError(f"Invalid environment key: {key!r}")
+        result.append((key, value))
+    return result
+
+
+def default_group_name() -> str:
+    try:
+        return grp.getgrgid(os.getgid()).gr_name
+    except KeyError:
+        return getpass.getuser()
+
+
+def build_systemd_wrapper(
+    *,
+    python_bin: str,
+    working_dir: str,
+    cuda_visible_devices: str,
+    extra_env: list[tuple[str, str]],
+    start_args: list[str],
+) -> str:
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        f"cd {shlex.quote(working_dir)}",
+        f"export CUDA_VISIBLE_DEVICES={shlex.quote(cuda_visible_devices)}",
+        "export PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE:-1}",
+        "export PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}",
+    ]
+    src_dir = Path(working_dir) / "src"
+    if src_dir.is_dir():
+        lines.append(f"export PYTHONPATH={shlex.quote(str(src_dir))}${{PYTHONPATH:+:$PYTHONPATH}}")
+    for key, value in extra_env:
+        lines.append(f"export {key}={shlex.quote(value)}")
+    lines.append("APP_ARGS=(")
+    for arg in start_args:
+        lines.append(f"  {shlex.quote(arg)}")
+    lines.append(")")
+    lines.append(
+        f"exec {shlex.quote(python_bin)} -m omnivoice-triton-server start " '"${APP_ARGS[@]}"'
+    )
+    return "\n".join(lines) + "\n"
+
+
+def build_systemd_unit(
+    *,
+    service_user: str,
+    service_group: str,
+    working_dir: str,
+    wrapper_path: str,
+) -> str:
+    return f"""[Unit]
+Description=OmniVoice Triton Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={service_user}
+Group={service_group}
+WorkingDirectory={working_dir}
+ExecStart={wrapper_path}
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+KillSignal=SIGTERM
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def install_service(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnivoice-triton-server install-service",
+        description="Install or update a Linux systemd service for OmniVoice",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--cuda-visible-devices",
+        "--cuda_visible_devices",
+        dest="cuda_visible_devices",
+        required=True,
+        help="Value for CUDA_VISIBLE_DEVICES, e.g. 0 or 6,7",
+    )
+    parser.add_argument("--service-name", default="omnivoice-server", help="systemd unit name")
+    parser.add_argument("--python", default=sys.executable, help="Python executable for the service")
+    parser.add_argument("--user", default=getpass.getuser(), help="Linux user for the service")
+    parser.add_argument("--group", default=default_group_name(), help="Linux group for the service")
+    parser.add_argument(
+        "--working-dir",
+        default=str(Path.cwd()),
+        help="Working directory for relative logs/model paths",
+    )
+    parser.add_argument("--env", action="append", default=[], help="Extra KEY=VALUE environment export")
+    parser.add_argument("--no-enable", action="store_true", help="Do not enable service at boot")
+    parser.add_argument("--no-start", action="store_true", help="Do not restart service after install")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print generated wrapper/unit instead of installing",
+    )
+    parser.add_argument(
+        "start_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments after -- are passed to omnivoice-triton-server start",
+    )
+    args = parser.parse_args(argv)
+
+    service_name = validate_service_name(args.service_name)
+    python_bin = str(Path(args.python).expanduser())
+    if not Path(python_bin).is_file():
+        raise FileNotFoundError(f"Python executable does not exist: {python_bin}")
+    working_dir = str(Path(args.working_dir).expanduser().resolve())
+    if not Path(working_dir).is_dir():
+        raise NotADirectoryError(f"Working directory does not exist: {working_dir}")
+    start_args = list(args.start_args)
+    if start_args and start_args[0] == "--":
+        start_args = start_args[1:]
+    extra_env = validate_env_lines(args.env)
+
+    wrapper_path = f"/etc/omnivoice/{service_name}.sh"
+    service_path = f"/etc/systemd/system/{service_name}.service"
+    wrapper_text = build_systemd_wrapper(
+        python_bin=python_bin,
+        working_dir=working_dir,
+        cuda_visible_devices=args.cuda_visible_devices,
+        extra_env=extra_env,
+        start_args=start_args,
+    )
+    unit_text = build_systemd_unit(
+        service_user=args.user,
+        service_group=args.group,
+        working_dir=working_dir,
+        wrapper_path=wrapper_path,
+    )
+
+    if args.dry_run:
+        print(f"# {wrapper_path}\n{wrapper_text}", end="")
+        print(f"\n# {service_path}\n{unit_text}", end="")
+        return 0
+
+    subprocess.run(["sudo", "-v"], check=True)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wrapper_tmp = Path(tmpdir) / f"{service_name}.sh"
+        service_tmp = Path(tmpdir) / f"{service_name}.service"
+        wrapper_tmp.write_text(wrapper_text, encoding="utf-8")
+        service_tmp.write_text(unit_text, encoding="utf-8")
+        subprocess.run(["sudo", "install", "-d", "-m", "0755", "/etc/omnivoice"], check=True)
+        subprocess.run(["sudo", "install", "-m", "0755", str(wrapper_tmp), wrapper_path], check=True)
+        subprocess.run(["sudo", "install", "-m", "0644", str(service_tmp), service_path], check=True)
+    subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
+    if not args.no_enable:
+        subprocess.run(["sudo", "systemctl", "enable", f"{service_name}.service"], check=True)
+    if not args.no_start:
+        subprocess.run(["sudo", "systemctl", "restart", f"{service_name}.service"], check=True)
+    print(f"Installed {service_path}")
+    print(f"Wrapper {wrapper_path}")
+    subprocess.run(
+        ["sudo", "systemctl", "--no-pager", "--lines=20", "status", f"{service_name}.service"],
+        check=False,
+    )
+    return 0
+
+
 def stop(argv: list[str] | None = None) -> int:
     cfg = Settings()
     parser = argparse.ArgumentParser(
@@ -733,6 +920,10 @@ def main(argv: list[str] | None = None) -> None:
         return
     if argv and argv[0] == "stop":
         raise SystemExit(stop(argv[1:]))
+    if argv and argv[0] in {"install-service", "install-systemd"}:
+        raise SystemExit(install_service(argv[1:]))
+    if len(argv) >= 2 and argv[0] == "service" and argv[1] in {"install", "register"}:
+        raise SystemExit(install_service(argv[2:]))
     if argv and argv[0] in {"-h", "--help"}:
         parser = argparse.ArgumentParser(
             prog="omnivoice-triton-server",
@@ -741,6 +932,7 @@ def main(argv: list[str] | None = None) -> None:
         subparsers = parser.add_subparsers(dest="command")
         add_start_arguments(subparsers.add_parser("start", help="Start the server"), Settings())
         subparsers.add_parser("stop", help="Stop the server")
+        subparsers.add_parser("install-service", help="Install or update a systemd service")
         parser.print_help()
         return
     start(argv)

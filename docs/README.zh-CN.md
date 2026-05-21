@@ -64,12 +64,27 @@ omnivoice-triton-server stop --pid-file logs/<run-id>/server.pid --no-port
 omnivoice-triton-server stop --systemd --service-name omnivoice-server
 ```
 
+注册或更新 systemd 服务：
+
+```bash
+omnivoice-triton-server install-service \
+  --cuda-visible-devices 0,1 \
+  --python "$(command -v python)" \
+  --service-name omnivoice-server \
+  --working-dir "$PWD" \
+  -- \
+  --port 9194 \
+  --model-id /path/to/OmniVoice \
+  --gpu-inferer 2 \
+  --max-batch-size 16
+```
+
 `scripts/start_server.sh` 只是一个 shell 包装器，真正入口是
 `python -m omnivoice-triton-server start`。
 
 ## systemd 服务
 
-可以用 `scripts/install_systemd_service.sh` 生成并注册 systemd unit：
+源码树里也保留了 `scripts/install_systemd_service.sh`：
 
 ```bash
 scripts/install_systemd_service.sh \

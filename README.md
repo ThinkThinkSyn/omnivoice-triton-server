@@ -108,13 +108,28 @@ Stop a systemd deployment:
 omnivoice-triton-server stop --systemd --service-name omnivoice-server
 ```
 
+Install or update a systemd deployment from the installed CLI:
+
+```bash
+omnivoice-triton-server install-service \
+  --cuda-visible-devices 0,1 \
+  --python "$(command -v python)" \
+  --service-name omnivoice-server \
+  --working-dir "$PWD" \
+  -- \
+  --port 9194 \
+  --model-id /path/to/OmniVoice \
+  --gpu-inferer 2 \
+  --max-batch-size 16
+```
+
 `CUDA_VISIBLE_DEVICES` is a deployment choice. The benchmark below used
 `CUDA_VISIBLE_DEVICES=6,7` on one 8-GPU test server because those two devices
 were selected for that run; use the device ids that are correct on your machine.
 `scripts/start_server.sh` is only a POSIX shell convenience wrapper around the
 same module entrypoint.
 
-Systemd install example:
+The repository also includes a shell wrapper for source-tree deployments:
 
 ```bash
 scripts/install_systemd_service.sh \
