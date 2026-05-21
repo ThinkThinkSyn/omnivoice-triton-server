@@ -29,10 +29,10 @@ inferer processes.
 ## Start
 
 ```bash
-pip install -e .
+pip install omnivoice-triton-server
 
 CUDA_VISIBLE_DEVICES=0,1 \
-python -m omnivoice-triton-server \
+omnivoice-triton-server start \
   --port 9194 \
   --model-id /path/to/OmniVoice \
   --gpu-inferer 2 \
@@ -44,7 +44,7 @@ python -m omnivoice-triton-server \
 ```
 
 `scripts/start_server.sh` is a POSIX shell convenience wrapper around
-`python -m omnivoice-triton-server`. It is intentionally small:
+`python -m omnivoice-triton-server start`. It is intentionally small:
 
 - uses `python` unless `OMNIVOICE_PYTHON` is set,
 - prepends this repository's `src/` to `PYTHONPATH`.
@@ -56,6 +56,14 @@ wrapper.
 If `--fastapi-workers` is omitted, the launcher uses the effective GPU inferer
 count as the worker count. If `--gpu-inferer` exceeds visible GPUs, it is clamped
 to the number of visible GPUs. Startup fails if no GPU inferer can be started.
+
+Stop commands:
+
+```bash
+omnivoice-triton-server stop --port 9194
+omnivoice-triton-server stop --pid-file logs/<run-id>/server.pid --no-port
+omnivoice-triton-server stop --systemd --service-name omnivoice-server
+```
 
 ## Systemd Service
 

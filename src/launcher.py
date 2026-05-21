@@ -89,8 +89,8 @@ def set_arg_env(cfg: Settings, attr: str, value, env_name: str) -> None:
     setattr(cfg, attr, value)
 
 
-def argv_has_option(option_names: set[str]) -> bool:
-    for item in sys.argv[1:]:
+def argv_has_option(argv: list[str], option_names: set[str]) -> bool:
+    for item in argv:
         option = item.split("=", 1)[0]
         if option in option_names:
             return True
@@ -151,13 +151,7 @@ def cleanup_old_log_dirs(cfg: Settings) -> None:
             shutil.rmtree(child, ignore_errors=True)
 
 
-def main() -> None:
-    cfg = Settings()
-    parser = argparse.ArgumentParser(
-        prog="omnivoice-triton-server",
-        description="Launch OmniVoice FastAPI server and GPU inferer processes",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+def add_start_arguments(parser: argparse.ArgumentParser, cfg: Settings) -> None:
     parser.add_argument("--host", default=cfg.host)
     parser.add_argument("--port", type=int, default=cfg.port)
     parser.add_argument("--fastapi-workers", "--workers", dest="workers", type=int, default=cfg.workers)
@@ -264,15 +258,26 @@ def main() -> None:
         default=cfg.text_chunk_short_underfill_penalty,
     )
     parser.add_argument("--default-voice-instructions", default=cfg.default_voice_instructions)
+
+
+def start(argv: list[str] | None = None) -> None:
+    argv = list(argv or [])
+    cfg = Settings()
+    parser = argparse.ArgumentParser(
+        prog="omnivoice-triton-server start",
+        description="Launch OmniVoice FastAPI server and GPU inferer processes",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    add_start_arguments(parser, cfg)
     for action in parser._actions:
         if action.dest != "help" and action.help is None:
             action.help = "default: %(default)s"
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     set_arg_env(cfg, "host", args.host, "OMNIVOICE_HOST")
     set_arg_env(cfg, "port", args.port, "OMNIVOICE_PORT")
     workers_was_explicit = (
-        argv_has_option({"--fastapi-workers", "--workers"}) or "OMNIVOICE_WORKERS" in os.environ
+        argv_has_option(argv, {"--fastapi-workers", "--workers"}) or "OMNIVOICE_WORKERS" in os.environ
     )
     set_arg_env(cfg, "workers", args.workers, "OMNIVOICE_WORKERS")
     set_arg_env(cfg, "infer_host", args.infer_host, "OMNIVOICE_INFER_HOST")
@@ -579,6 +584,166 @@ def main() -> None:
         )
     finally:
         shutdown()
+
+
+def pid_exists(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def read_pid_file(path: str) -> int | None:
+    try:
+        raw = Path(path).expanduser().read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def latest_pid_file(log_dir: str) -> str | None:
+    root = Path(log_dir).expanduser()
+    if not root.exists():
+        return None
+    candidates = [p for p in root.glob("*/server.pid") if p.is_file()]
+    if not candidates:
+        return None
+    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    return str(newest)
+
+
+def pids_listening_on_port(port: int) -> set[int]:
+    pids: set[int] = set()
+    commands = [
+        ["lsof", "-ti", f"TCP:{port}", "-sTCP:LISTEN"],
+        ["fuser", "-n", "tcp", str(port)],
+    ]
+    for cmd in commands:
+        try:
+            proc = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            continue
+        for item in proc.stdout.replace(",", " ").split():
+            try:
+                pids.add(int(item))
+            except ValueError:
+                pass
+        if pids:
+            break
+    return pids
+
+
+def terminate_pids(pids: set[int], timeout_s: float, kill_after_timeout: bool) -> int:
+    live = {pid for pid in pids if pid_exists(pid)}
+    if not live:
+        return 0
+    for pid in sorted(live):
+        print(f"Stopping pid {pid}", flush=True)
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        live = {pid for pid in live if pid_exists(pid)}
+        if not live:
+            return 0
+        time.sleep(0.2)
+    if kill_after_timeout:
+        for pid in sorted(live):
+            print(f"Killing pid {pid}", flush=True)
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        return 0
+    print(f"Timed out waiting for pid(s): {', '.join(str(pid) for pid in sorted(live))}", file=sys.stderr)
+    return 1
+
+
+def stop(argv: list[str] | None = None) -> int:
+    cfg = Settings()
+    parser = argparse.ArgumentParser(
+        prog="omnivoice-triton-server stop",
+        description="Stop an OmniVoice server started by this CLI or by systemd",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--pid-file", action="append", default=[], help="PID file to stop")
+    parser.add_argument("--log-dir", default=cfg.log_dir, help="Search latest <log-dir>/*/server.pid")
+    parser.add_argument("--port", type=int, default=cfg.port, help="Stop process listening on this port")
+    parser.add_argument("--no-port", action="store_true", help="Do not use port-based process discovery")
+    parser.add_argument("--systemd", action="store_true", help="Run systemctl stop for the service")
+    parser.add_argument("--service-name", default="omnivoice-server", help="systemd service name")
+    parser.add_argument("--timeout-s", type=float, default=30.0, help="Graceful shutdown timeout")
+    parser.add_argument(
+        "--no-kill",
+        action="store_true",
+        help="Do not SIGKILL remaining processes after timeout",
+    )
+    args = parser.parse_args(argv)
+
+    if args.systemd:
+        service = args.service_name
+        if not service.endswith(".service"):
+            service = f"{service}.service"
+        proc = subprocess.run(["systemctl", "stop", service], check=False)
+        return int(proc.returncode)
+
+    pid_files: list[str] = list(args.pid_file)
+    if not pid_files:
+        discovered = latest_pid_file(args.log_dir)
+        if discovered:
+            pid_files.append(discovered)
+
+    pids: set[int] = set()
+    for pid_file in pid_files:
+        pid = read_pid_file(pid_file)
+        if pid is not None:
+            pids.add(pid)
+        else:
+            print(f"Ignoring missing or invalid pid file: {pid_file}", file=sys.stderr)
+
+    if not args.no_port and args.port:
+        pids.update(pids_listening_on_port(args.port))
+
+    if not pids:
+        print("No OmniVoice server process found", file=sys.stderr)
+        return 1
+    return terminate_pids(pids, args.timeout_s, not args.no_kill)
+
+
+def main(argv: list[str] | None = None) -> None:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in {"start", "serve"}:
+        start(argv[1:])
+        return
+    if argv and argv[0] == "stop":
+        raise SystemExit(stop(argv[1:]))
+    if argv and argv[0] in {"-h", "--help"}:
+        parser = argparse.ArgumentParser(
+            prog="omnivoice-triton-server",
+            description="OmniVoice Triton Server command line",
+        )
+        subparsers = parser.add_subparsers(dest="command")
+        add_start_arguments(subparsers.add_parser("start", help="Start the server"), Settings())
+        subparsers.add_parser("stop", help="Stop the server")
+        parser.print_help()
+        return
+    start(argv)
 
 
 if __name__ == "__main__":

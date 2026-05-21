@@ -67,17 +67,17 @@ CPU inferer code was removed. Scale this server with GPU inferer processes.
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e .
+pip install omnivoice-triton-server
 
 export CUDA_VISIBLE_DEVICES=0
-python -m omnivoice-triton-server
+omnivoice-triton-server start
 ```
 
 Two-GPU example:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 \
-python -m omnivoice-triton-server \
+omnivoice-triton-server start \
   --port 9194 \
   --model-id /path/to/OmniVoice \
   --gpu-inferer 2 \
@@ -86,6 +86,26 @@ python -m omnivoice-triton-server \
   --cuda-stream-count 2 \
   --runner-mode hybrid \
   --num-step 32
+```
+
+Installing the package adds an `omnivoice-triton-server` Python console command.
+The module entrypoint is also available:
+
+```bash
+python -m omnivoice-triton-server start --port 9194
+```
+
+Stop a foreground/background process by port or pid file:
+
+```bash
+omnivoice-triton-server stop --port 9194
+omnivoice-triton-server stop --pid-file logs/20260520-212301/server.pid --no-port
+```
+
+Stop a systemd deployment:
+
+```bash
+omnivoice-triton-server stop --systemd --service-name omnivoice-server
 ```
 
 `CUDA_VISIBLE_DEVICES` is a deployment choice. The benchmark below used
@@ -108,10 +128,10 @@ scripts/install_systemd_service.sh \
   --max-batch-size 16
 ```
 
-Arguments after `--` are passed directly to `python -m
-omnivoice-triton-server`. The script writes `/etc/omnivoice/<service>.sh` and
-`/etc/systemd/system/<service>.service`, then reloads, enables, and restarts the
-unit unless `--no-enable` or `--no-start` is used.
+Arguments after `--` are passed directly to `omnivoice-triton-server start`.
+The script writes `/etc/omnivoice/<service>.sh` and
+`/etc/systemd/system/<service>.service`, then reloads, enables, and restarts
+the unit unless `--no-enable` or `--no-start` is used.
 
 ## Important Arguments
 

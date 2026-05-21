@@ -7,4 +7,4 @@ export PYTHONPATH="$ROOT/src:${PYTHONPATH:-}"
 PYTHON_BIN="${OMNIVOICE_PYTHON:-python}"
 
 cd "$ROOT"
-exec "$PYTHON_BIN" -m omnivoice-triton-server "$@"
+exec "$PYTHON_BIN" -m omnivoice-triton-server start "$@"

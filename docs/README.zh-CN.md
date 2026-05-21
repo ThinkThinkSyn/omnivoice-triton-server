@@ -36,10 +36,10 @@ CPU inferer 已移除，扩容只靠 GPU inferer。
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-pip install -e .
+pip install omnivoice-triton-server
 
 CUDA_VISIBLE_DEVICES=0,1 \
-python -m omnivoice-triton-server \
+omnivoice-triton-server start \
   --port 9194 \
   --model-id /path/to/OmniVoice \
   --gpu-inferer 2 \
@@ -50,8 +50,22 @@ python -m omnivoice-triton-server \
   --num-step 32
 ```
 
+安装后会多出 `omnivoice-triton-server` 命令。也可以用模块入口：
+
+```bash
+python -m omnivoice-triton-server start --port 9194
+```
+
+停止进程：
+
+```bash
+omnivoice-triton-server stop --port 9194
+omnivoice-triton-server stop --pid-file logs/<run-id>/server.pid --no-port
+omnivoice-triton-server stop --systemd --service-name omnivoice-server
+```
+
 `scripts/start_server.sh` 只是一个 shell 包装器，真正入口是
-`python -m omnivoice-triton-server`。
+`python -m omnivoice-triton-server start`。
 
 ## systemd 服务
 
@@ -73,7 +87,7 @@ scripts/install_systemd_service.sh \
   --num-step 32
 ```
 
-`--` 后面的参数会原样传给 `python -m omnivoice-triton-server`。脚本会写入
+`--` 后面的参数会原样传给 `omnivoice-triton-server start`。脚本会写入
 `/etc/omnivoice/<service>.sh` 和
 `/etc/systemd/system/<service>.service`，默认执行 `daemon-reload`、开机启用并
 重启服务；只想生成 unit 时可以加 `--no-enable` 或 `--no-start`。
