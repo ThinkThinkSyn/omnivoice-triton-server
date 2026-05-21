@@ -17,6 +17,7 @@ from config import Settings
 from infer_client import InfererClient
 from metrics_shm import SharedMetricsGroupReader, SharedMetricsReader
 from protocol import InferRequest, SpeechRequest
+from text_normalization import normalize_tts_text_for_language
 from voices import resolve_mode_and_instruct
 
 
@@ -125,10 +126,11 @@ def create_app() -> FastAPI:
             body.instructions,
             cfg.default_voice_instructions,
         )
+        normalized_input = normalize_tts_text_for_language(body.input, body.language)
         infer_req = InferRequest(
             request_id=uuid.uuid4().hex,
-            input=body.input,
-            **_chunk_request_text(body.input, body.duration, body.chunk_mode, cfg),
+            input=normalized_input,
+            **_chunk_request_text(normalized_input, body.duration, body.chunk_mode, cfg),
             mode=mode,
             instruct=instruct,
             response_format=body.response_format,
@@ -183,16 +185,18 @@ def create_app() -> FastAPI:
         request_timeout_s: float | None = Form(None),
     ):
         cfg: Settings = request.app.state.cfg
+        resolved_language = language or language_id
+        normalized_text = normalize_tts_text_for_language(text, resolved_language)
         infer_req = InferRequest(
             request_id=uuid.uuid4().hex,
-            input=text,
-            **_chunk_request_text(text, duration, chunk_mode, cfg),
+            input=normalized_text,
+            **_chunk_request_text(normalized_text, duration, chunk_mode, cfg),
             mode="design",
             instruct=instruct,
             response_format=response_format,
             speed=speed or 1.0,
             duration=duration,
-            language=language or language_id,
+            language=resolved_language,
             chunk_mode=chunk_mode,
             num_step=num_step,
         )
@@ -227,17 +231,20 @@ def create_app() -> FastAPI:
 
         ref_audio_b64 = await _read_reference_audio_b64(ref_audio, ref_audio_base64)
         cfg: Settings = request.app.state.cfg
+        resolved_language = language or language_id
+        normalized_text = normalize_tts_text_for_language(text, resolved_language)
+        normalized_ref_text = normalize_tts_text_for_language(ref_text.strip(), resolved_language)
         infer_req = InferRequest(
             request_id=uuid.uuid4().hex,
-            input=text,
-            **_chunk_request_text(text, duration, chunk_mode, cfg),
+            input=normalized_text,
+            **_chunk_request_text(normalized_text, duration, chunk_mode, cfg),
             mode="clone",
             ref_audio_b64=ref_audio_b64,
-            ref_text=ref_text.strip(),
+            ref_text=normalized_ref_text,
             response_format=response_format,
             speed=speed or 1.0,
             duration=duration,
-            language=language or language_id,
+            language=resolved_language,
             chunk_mode=chunk_mode,
             num_step=num_step,
         )
