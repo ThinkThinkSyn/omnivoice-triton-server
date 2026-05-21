@@ -5,6 +5,7 @@ server runs FastAPI workers for request handling and one or more independent GPU
 inferer processes for model execution.
 
 中文说明: [docs/README.zh-CN.md](docs/README.zh-CN.md)
+Request API and language list: [docs/request.md](docs/request.md)
 
 ## Quick Start
 
