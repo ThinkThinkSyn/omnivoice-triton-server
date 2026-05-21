@@ -238,9 +238,8 @@ Test configuration:
 
 | Workload | Wall time | Completed req/s | Generated audio | Audio realtime | RTF |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Short speech, `num_step=16`, 1000 requests | 62.257 s | 16.062 | 3,525.640 s | 56.630x | 0.0177 |
-| Short speech, `num_step=32`, 1000 requests | 120.840 s | 8.275 | 3,526.300 s | 29.182x | 0.0343 |
-| Short speech, mixed `num_step=16/32`, 2000 requests | 205.533 s | 9.731 | 8,346.860 s | 40.610x | 0.0246 |
+| Short speech/design, `num_step=16`, 1000 requests | 36.717 s | 27.235 | 785.980 s | 21.408x | 0.0467 |
+| Short speech/design, `num_step=32`, 1000 requests | 62.998 s | 15.874 | 785.690 s | 12.472x | 0.0802 |
 
 `Audio realtime` is generated audio duration divided by wall time. `RTF` is
 wall time divided by generated audio duration.
@@ -249,7 +248,8 @@ wall time divided by generated audio duration.
 
 | Workload | Client requests | Backend tasks | Backend batches | Tasks/backend batch | Notes |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Mixed `num_step=16/32` | 2,000 | 2,000 | 129 | 15.504 | Scheduler prefers same-step batches and only mixes step counts on timeout. |
+| Short speech/design, `num_step=16` | 1,000 | 1,000 | 83 | 12.048 | Same traffic distribution as the 32-step row. |
+| Short speech/design, `num_step=32` | 1,000 | 1,000 | 67 | 14.925 | Same traffic distribution as the 16-step row. |
 
 The useful batching signal is `Tasks/backend batch`: higher means the scheduler
 kept the GPU inferers fed with larger model batches.
